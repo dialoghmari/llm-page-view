@@ -11,6 +11,9 @@ const toggleCookies = document.getElementById('toggleCookies');
 const toggleLocalStorage = document.getElementById('toggleLocalStorage');
 const toggleSessionStorage = document.getElementById('toggleSessionStorage');
 const toggleJavaScript = document.getElementById('toggleJavaScript');
+const toggleInjectHeaders = document.getElementById('toggleInjectHeaders');
+const customHeadersList = document.getElementById('customHeadersList');
+const addHeaderBtn = document.getElementById('addHeaderBtn');
 
 let currentDomain = null;
 let currentTabId = null;
@@ -233,6 +236,95 @@ async function loadPrismSource() {
   }
 }
 
+// --- Custom headers ---
+
+function createHeaderRow(key = '', value = '') {
+  const row = document.createElement('div');
+  row.className = 'header-row';
+
+  const keyInput = document.createElement('input');
+  keyInput.type = 'text';
+  keyInput.className = 'text-input header-key';
+  keyInput.placeholder = 'Header name';
+  keyInput.value = key;
+  keyInput.spellcheck = false;
+
+  const valueInput = document.createElement('input');
+  valueInput.type = 'text';
+  valueInput.className = 'text-input header-value';
+  valueInput.placeholder = 'Value';
+  valueInput.value = value;
+  valueInput.spellcheck = false;
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'btn-remove-header';
+  removeBtn.textContent = '\u00d7';
+  removeBtn.title = 'Remove header';
+  removeBtn.addEventListener('click', () => {
+    row.remove();
+    saveCustomHeaders();
+  });
+
+  keyInput.addEventListener('input', saveCustomHeaders);
+  valueInput.addEventListener('input', saveCustomHeaders);
+
+  row.appendChild(keyInput);
+  row.appendChild(valueInput);
+  row.appendChild(removeBtn);
+  return row;
+}
+
+function getCustomHeaders() {
+  const rows = customHeadersList.querySelectorAll('.header-row');
+  const headers = [];
+  for (const row of rows) {
+    const key = row.querySelector('.header-key').value.trim();
+    const value = row.querySelector('.header-value').value.trim();
+    if (key) headers.push({ key, value });
+  }
+  return headers;
+}
+
+function renderCustomHeaders(headers) {
+  customHeadersList.innerHTML = '';
+  if (headers && headers.length > 0) {
+    for (const { key, value } of headers) {
+      customHeadersList.appendChild(createHeaderRow(key, value));
+    }
+  }
+}
+
+let _saveHeadersTimer = null;
+function saveCustomHeaders() {
+  clearTimeout(_saveHeadersTimer);
+  _saveHeadersTimer = setTimeout(_doSaveCustomHeaders, 300);
+}
+
+async function _doSaveCustomHeaders() {
+  if (!currentDomain) return;
+  const headers = getCustomHeaders();
+  const injectEnabled = toggleInjectHeaders.checked;
+  await chrome.runtime.sendMessage({
+    type: 'save-custom-headers',
+    domain: currentDomain,
+    headers,
+    injectEnabled,
+  });
+}
+
+async function loadCustomHeaders(domain) {
+  const response = await chrome.runtime.sendMessage({ type: 'get-custom-headers', domain });
+  const data = response || {};
+  renderCustomHeaders(data.headers || []);
+  toggleInjectHeaders.checked = !!data.injectEnabled;
+}
+
+addHeaderBtn.addEventListener('click', () => {
+  customHeadersList.appendChild(createHeaderRow());
+});
+
+toggleInjectHeaders.addEventListener('change', saveCustomHeaders);
+
 // --- Active tab tracking ---
 
 async function updateActiveTab() {
@@ -246,9 +338,12 @@ async function updateActiveTab() {
 
   if (domain && !isRestrictedUrl(tab.url)) {
     await loadSettings(domain);
+    await loadCustomHeaders(domain);
     enableControls(true);
   } else {
     resetToggles();
+    renderCustomHeaders([]);
+    toggleInjectHeaders.checked = false;
     enableControls(false);
   }
 }
@@ -319,11 +414,13 @@ async function handleFetch() {
   showStatus('loading', 'Fetching...');
 
   try {
+    const customHeaders = getCustomHeaders();
     const response = await chrome.runtime.sendMessage({
       type: 'fetch-as-llm',
       url,
       acceptHeader,
       userAgent,
+      customHeaders,
     });
 
     if (response.error) {
@@ -360,7 +457,8 @@ async function handleFetch() {
       html,
     });
 
-    showStatus('success', `Fetched (${contentType || 'unknown type'})`);
+    const redirectInfo = response.redirected ? ' (redirected)' : '';
+    showStatus('success', `Fetched (${contentType || 'unknown type'})${redirectInfo}`);
   } catch (err) {
     showStatus('error', `Error: ${err.message}`);
   }

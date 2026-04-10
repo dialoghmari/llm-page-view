@@ -11,13 +11,21 @@ function domainHash(domain) {
   return (Math.abs(hash) % (1 << 30)) + 1;
 }
 
+// Rule ID slots per domain: base*4, base*4+1, base*4+2, base*4+3
 function cookieRuleId(domain) {
-  return domainHash(domain) * 2;
+  return domainHash(domain) * 4;
 }
 
 function jsRuleId(domain) {
-  return domainHash(domain) * 2 + 1;
+  return domainHash(domain) * 4 + 1;
 }
+
+function customHeadersRuleId(domain) {
+  return domainHash(domain) * 4 + 2;
+}
+
+// Reserved rule ID for temporary fetch-time header injection (outside domain hash range)
+const FETCH_TEMP_RULE_ID = (1 << 30) + 100;
 
 // --- Settings helpers ---
 
@@ -126,6 +134,55 @@ async function applyStorageBlocking(tabId, blockLocal, blockSession) {
   }
 }
 
+// --- Custom headers storage and injection ---
+
+function customHeadersKey(domain) {
+  return `headers_${domain}`;
+}
+
+async function getCustomHeaders(domain) {
+  const result = await chrome.storage.local.get(customHeadersKey(domain));
+  return result[customHeadersKey(domain)] || {};
+}
+
+async function saveCustomHeaders(domain, headers, injectEnabled) {
+  await chrome.storage.local.set({
+    [customHeadersKey(domain)]: { headers, injectEnabled },
+  });
+}
+
+async function applyCustomHeaderInjection(domain, headers, injectEnabled) {
+  const ruleId = customHeadersRuleId(domain);
+
+  // Always remove existing rule first
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [ruleId],
+  });
+
+  // Only add if enabled and there are headers with non-empty keys
+  const validHeaders = (headers || []).filter(h => h.key);
+  if (!injectEnabled || validHeaders.length === 0) return;
+
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    addRules: [{
+      id: ruleId,
+      priority: 1,
+      action: {
+        type: 'modifyHeaders',
+        requestHeaders: validHeaders.map(h => ({
+          header: h.key,
+          operation: 'set',
+          value: h.value,
+        })),
+      },
+      condition: {
+        requestDomains: [domain],
+        resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'stylesheet', 'script', 'image', 'font', 'other'],
+      },
+    }],
+  });
+}
+
 // --- Apply all blocking rules for a domain ---
 
 async function applyAllRules(domain, settings, tabId) {
@@ -177,6 +234,14 @@ async function handleMessage(msg) {
       await applyAllRules(msg.domain, msg.settings, msg.tabId);
       return { ok: true };
 
+    case 'get-custom-headers':
+      return await getCustomHeaders(msg.domain);
+
+    case 'save-custom-headers':
+      await saveCustomHeaders(msg.domain, msg.headers, msg.injectEnabled);
+      await applyCustomHeaderInjection(msg.domain, msg.headers, msg.injectEnabled);
+      return { ok: true };
+
     case 'get-prism-source':
       return await handleGetPrismSource();
 
@@ -209,20 +274,78 @@ async function handleGetPrismSource() {
   }
 }
 
-async function handleFetchAsLlm({ url, acceptHeader, userAgent }) {
+async function handleFetchAsLlm({ url, acceptHeader, userAgent, customHeaders }) {
+  let domain;
   try {
-    const headers = { 'Accept': acceptHeader };
-    if (userAgent) {
-      headers['User-Agent'] = userAgent;
+    domain = new URL(url).hostname;
+  } catch (err) {
+    return { error: `Invalid URL: ${err.message}` };
+  }
+
+  // Build the header list for declarativeNetRequest injection.
+  // This is more reliable than fetch() headers because User-Agent
+  // is a forbidden header in the Fetch API (silently dropped).
+  const requestHeaders = [
+    { header: 'Accept', operation: 'set', value: acceptHeader },
+  ];
+
+  if (userAgent) {
+    requestHeaders.push({ header: 'User-Agent', operation: 'set', value: userAgent });
+  }
+
+  if (customHeaders && customHeaders.length > 0) {
+    for (const { key, value } of customHeaders) {
+      if (key) {
+        requestHeaders.push({ header: key, operation: 'set', value: value || '' });
+      }
     }
-    const response = await fetch(url, {
-      headers,
-      credentials: 'omit',
+  }
+
+  try {
+    // Set temporary rule to inject headers on all requests to this domain.
+    // This covers both the initial request AND any redirect-followed requests
+    // (e.g. Vercel 307 bypass redirects). The browser handles redirects natively,
+    // storing Set-Cookie and forwarding cookies on subsequent hops.
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [FETCH_TEMP_RULE_ID],
+      addRules: [{
+        id: FETCH_TEMP_RULE_ID,
+        priority: 2,
+        action: {
+          type: 'modifyHeaders',
+          requestHeaders,
+        },
+        condition: {
+          requestDomains: [domain],
+          resourceTypes: ['xmlhttprequest', 'other'],
+        },
+      }],
     });
+
+    // credentials: 'include' so the browser stores Set-Cookie from redirects
+    // and forwards them on subsequent hops (needed for Vercel bypass JWT).
+    // redirect: 'follow' (default) lets the browser handle redirects natively.
+    const response = await fetch(url, { credentials: 'include' });
     const body = await response.text();
     const contentType = response.headers.get('Content-Type') || '';
-    return { body, contentType, status: response.status };
+    const finalUrl = response.url;
+
+    // Clean up temporary rule
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [FETCH_TEMP_RULE_ID],
+    });
+
+    return {
+      body,
+      contentType,
+      status: response.status,
+      finalUrl,
+      redirected: response.redirected || undefined,
+    };
   } catch (err) {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [FETCH_TEMP_RULE_ID],
+    }).catch(() => {});
     return { error: `Fetch failed: ${err.message}` };
   }
 }
