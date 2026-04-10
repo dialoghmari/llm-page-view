@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "See it as an LLM",
+  "version": "1.0.0",
+  "description": "Preview any web page as an LLM would see it — fetch with custom Accept headers, block cookies, storage, and JavaScript.",
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "scripting",
+    "storage",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "See it as an LLM"
+  }
+}
