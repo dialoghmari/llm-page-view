@@ -1,4 +1,4 @@
-# See it as an LLM
+# LLM Page View
 
 Chrome Extension (Manifest V3) to preview web pages as an LLM sees them.
 
