@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:developer.chrome.com)",
-      "WebFetch(domain:cdn.jsdelivr.net)"
+      "WebFetch(domain:cdn.jsdelivr.net)",
+      "Bash(ls -la *.md CLAUDE.md)"
     ]
   }
 }
