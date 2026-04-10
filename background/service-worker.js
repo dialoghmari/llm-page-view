@@ -242,6 +242,11 @@ async function handleMessage(msg) {
       await applyCustomHeaderInjection(msg.domain, msg.headers, msg.injectEnabled);
       return { ok: true };
 
+    case 'navigate-llm':
+      // Forward to side panel so it can re-fetch with current settings
+      chrome.runtime.sendMessage({ type: 'do-fetch-url', url: msg.url }).catch(() => {});
+      return { ok: true };
+
     case 'get-prism-source':
       return await handleGetPrismSource();
 
@@ -361,6 +366,22 @@ async function handleReplaceTabContent({ tabId, html }) {
       },
       args: [html],
     });
+
+    // Inject link click interceptor so navigation stays within the extension
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        document.addEventListener('click', (e) => {
+          const anchor = e.target.closest('a[href]');
+          if (!anchor) return;
+          const href = anchor.href;
+          if (!href || href.startsWith('javascript:') || href.startsWith('#')) return;
+          e.preventDefault();
+          chrome.runtime.sendMessage({ type: 'navigate-llm', url: href });
+        });
+      },
+    });
+
     return { ok: true };
   } catch (err) {
     return { error: `Could not replace tab content: ${err.message}` };

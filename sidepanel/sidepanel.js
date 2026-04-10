@@ -392,16 +392,21 @@ async function saveSettings() {
 
 // --- Fetch as LLM ---
 
-async function handleFetch() {
+async function handleFetch(overrideUrl) {
   if (!currentTabId || !currentDomain) return;
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || isRestrictedUrl(tab.url)) {
-    showStatus('error', 'Cannot fetch restricted URLs (chrome://, about:, etc.)');
-    return;
+  let url;
+  if (overrideUrl) {
+    url = overrideUrl;
+  } else {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || isRestrictedUrl(tab.url)) {
+      showStatus('error', 'Cannot fetch restricted URLs (chrome://, about:, etc.)');
+      return;
+    }
+    url = tab.url;
   }
 
-  const url = tab.url;
   const acceptHeader = acceptHeaderInput.value.trim();
   if (!acceptHeader) {
     showStatus('error', 'Accept header cannot be empty.');
@@ -479,7 +484,14 @@ userAgentSelect.addEventListener('change', () => {
 
 // --- Event listeners ---
 
-fetchBtn.addEventListener('click', handleFetch);
+fetchBtn.addEventListener('click', () => handleFetch());
+
+// Listen for link navigation from rendered pages
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'do-fetch-url' && msg.url) {
+    handleFetch(msg.url);
+  }
+});
 
 toggleCookies.addEventListener('change', saveSettings);
 toggleLocalStorage.addEventListener('change', saveSettings);
