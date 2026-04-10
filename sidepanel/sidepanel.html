@@ -14,6 +14,7 @@
 
   <section class="section">
     <h2>Fetch as LLM</h2>
+
     <label class="field-label" for="acceptHeader">Accept header</label>
     <input
       type="text"
@@ -22,8 +23,47 @@
       value="text/markdown, text/html"
       spellcheck="false"
     >
+
+    <label class="field-label" for="userAgentSelect">User-Agent</label>
+    <div class="ua-row">
+      <select id="userAgentSelect" class="select-input">
+        <option value="ChatGPT-User">ChatGPT-User</option>
+        <option value="ClaudeBot/1.0">ClaudeBot</option>
+        <option value="Google-Extended">Google-Extended</option>
+        <option value="PerplexityBot/1.0">PerplexityBot</option>
+        <option value="custom">Custom...</option>
+      </select>
+    </div>
+    <input
+      type="text"
+      id="userAgentCustom"
+      class="text-input ua-custom hidden"
+      placeholder="Enter custom User-Agent..."
+      spellcheck="false"
+    >
+
     <button id="fetchBtn" class="btn-primary">Fetch</button>
     <div id="status" class="status hidden"></div>
+  </section>
+
+  <section class="section">
+    <h2>Render Options</h2>
+
+    <div class="toggle-row">
+      <span class="toggle-label">Render Markdown</span>
+      <label class="switch">
+        <input type="checkbox" id="toggleRenderMarkdown" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <span class="toggle-label">Show Frontmatter</span>
+      <label class="switch">
+        <input type="checkbox" id="toggleFrontmatter" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
   </section>
 
   <section class="section">

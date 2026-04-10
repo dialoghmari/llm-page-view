@@ -177,15 +177,46 @@ async function handleMessage(msg) {
       await applyAllRules(msg.domain, msg.settings, msg.tabId);
       return { ok: true };
 
+    case 'get-prism-source':
+      return await handleGetPrismSource();
+
     default:
       return { error: 'Unknown message type' };
   }
 }
 
-async function handleFetchAsLlm({ url, acceptHeader }) {
+async function handleGetPrismSource() {
   try {
+    const files = [
+      'lib/prism.min.js',
+      'lib/prism-markup.min.js',
+      'lib/prism-css.min.js',
+      'lib/prism-javascript.min.js',
+      'lib/prism-typescript.min.js',
+      'lib/prism-python.min.js',
+      'lib/prism-bash.min.js',
+      'lib/prism-json.min.js',
+      'lib/prism-yaml.min.js',
+      'lib/prism-jsx.min.js',
+      'lib/prism-tsx.min.js',
+    ];
+    const sources = await Promise.all(
+      files.map(f => fetch(chrome.runtime.getURL(f)).then(r => r.text()).catch(() => ''))
+    );
+    return { source: sources.join('\n') };
+  } catch {
+    return { source: '' };
+  }
+}
+
+async function handleFetchAsLlm({ url, acceptHeader, userAgent }) {
+  try {
+    const headers = { 'Accept': acceptHeader };
+    if (userAgent) {
+      headers['User-Agent'] = userAgent;
+    }
     const response = await fetch(url, {
-      headers: { 'Accept': acceptHeader },
+      headers,
       credentials: 'omit',
     });
     const body = await response.text();
